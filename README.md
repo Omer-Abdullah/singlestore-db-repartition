@@ -63,8 +63,6 @@ working copies of the data.
 ## Prerequisites
 
 - `memsql` CLI and `mysqldump` on the host running the script
-- A readable credentials source for the SingleStore user (see
-  [Configuration](#configuration))
 - Enough free space in the dump directory for a schema (or full, for `_vew`)
   dump of the largest database being repartitioned
 - For databases with views: extract and repair view DDL **first** —
@@ -75,8 +73,8 @@ working copies of the data.
 ## Configuration
 
 The script reads connection settings from environment variables, So make sure to set the environment variables.
-By default, if env vars are not set, expect execution failuer:
-
+- By default, if env vars are not set, expect execution failuer:
+- The script prompts the operator to enter SS_PASSWORD interactively.
 | Variable | Default | Purpose |
 |---|---|---|
 | `SS_HOST` | - | Master Aggregator host |
