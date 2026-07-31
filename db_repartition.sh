@@ -21,14 +21,14 @@ BOLD1=$'\033[1m'
 NC='\033[0m'
 
 # ── Runtime config — override via environment variables if needed ──────────────
-SS_HOST="${SINGLESTORE_HOST:-10.21.174.177}"
-SS_PORT="${SINGLESTORE_PORT:-3306}"
-SS_USER="${SINGLESTORE_USER:-root}"
-SS_PASSWORD=`cat /data01/EVN_Varible`
-DUMP_DIR="${DUMP_DIR:-/data01/Backup/repartition}"
+SS_HOST="${SINGLESTORE_HOST:?set SS_HOST}"
+SS_PORT="${SINGLESTORE_PORT:?set SS_PORT}"
+SS_USER="${SINGLESTORE_USER:?set SS_USER}"
+SS_PASSWORD=`cat /password/${SS_USER}_pswd`
+DUMP_DIR="${DUMP_DIR:-/default/dump/directory}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-8}"   # concurrent INSERT SELECT jobs; tune to CPU/IO headroom
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/data01/Backup/repartition/db_repartition_${TIMESTAMP}.log"
+LOG_FILE="/default/logFile/directory/name_${TIMESTAMP}.log"
 
 # ── Prefixes every message with a timestamp ───────────────────────────────────
 log() {
