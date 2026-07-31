@@ -74,23 +74,25 @@ working copies of the data.
 
 ## Configuration
 
-The script reads connection settings from environment variables, with
-fallback defaults:
+The script reads connection settings from environment variables, So make sure to set the environment variables.
+By default, if env vars are not set, expect execution failuer:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SINGLESTORE_HOST` | - | Master Aggregator host |
-| `SINGLESTORE_PORT` | - | Port |
-| `SINGLESTORE_USER` | - | SQL user |
-| `DUMP_DIR` | - | Where dumps/logs are written |
+| `SS_HOST` | - | Master Aggregator host |
+| `SS_PORT` | - | Port |
+| `SS_USER` | - | SQL user |
+| `SS_PASSWORD` | - | SQL user password |
+| `DUMP_DIR` |- | Where dumps/logs are written |
 | `PARALLEL_JOBS` | `8` | Concurrent `INSERT ... SELECT` copy jobs |
 
 
 ## Usage
 
 ```bash
-export SINGLESTORE_HOST=10.x.x.x        # your Master Aggregator
-export DUMP_DIR=/data01/Backup/repartition
+export SS_HOST=10.x.x.x        # your Master Aggregator
+export DUMP_DIR=/dump/dir
+export PARALLEL_JOBS=4         # tune it based on the available resources / tables size
 ./db_repartition.sh
 ```
 
