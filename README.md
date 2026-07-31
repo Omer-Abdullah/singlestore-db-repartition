@@ -79,19 +79,12 @@ fallback defaults:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SINGLESTORE_HOST` | — | Master Aggregator host |
-| `SINGLESTORE_PORT` | `3306` | Port |
-| `SINGLESTORE_USER` | `root` | SQL user |
-| `DUMP_DIR` | `/data01/Backup/repartition` | Where dumps/logs are written |
+| `SINGLESTORE_HOST` | - | Master Aggregator host |
+| `SINGLESTORE_PORT` | - | Port |
+| `SINGLESTORE_USER` | - | SQL user |
+| `DUMP_DIR` | - | Where dumps/logs are written |
 | `PARALLEL_JOBS` | `8` | Concurrent `INSERT ... SELECT` copy jobs |
 
-> **⚠️ Before pushing changes or sharing this repo further:** this script
-> still has environment-specific fallback defaults baked in (an internal
-> host IP, a credential file path). If this repo is or becomes public,
-> replace those defaults with required env vars (e.g.
-> `SINGLESTORE_HOST="${SINGLESTORE_HOST:?set SINGLESTORE_HOST}"`) instead of
-> hardcoding real infrastructure details. See
-> [Security notes](#security-notes) below.
 
 ## Usage
 
@@ -134,7 +127,7 @@ target partition count, and shows a summary table before any destructive step.
 ## Security notes
 
 - Replace any hardcoded internal IPs, hostnames, or credential file paths
-  with environment variables before making this repo public.
+  with environment variables.
 - Dumps and logs are written outside this repo by default
   (`DUMP_DIR`/`LOG_FILE`); `.gitignore` also excludes common dump/log
   patterns as a second layer of protection.
