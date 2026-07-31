@@ -5,8 +5,3 @@ All rights reserved.
 This repository contains internal operational tooling and is intended for
 use within the owning organization only. It is not licensed for external
 distribution or reuse.
-
----
-If you'd rather open-source this (e.g. as a general-purpose SingleStore
-ops toolkit with sensitive details stripped out), replace this file with a
-standard license such as MIT or Apache 2.0.
