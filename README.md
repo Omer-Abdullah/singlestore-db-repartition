@@ -72,18 +72,20 @@ working copies of the data.
 
 ## Configuration
 
-The script reads connection settings from environment variables, So make sure to set the environment variables.
-- By default, if env vars are not set, expect execution failuer:
-- The script prompts the operator to enter SS_PASSWORD interactively.
-| Variable | Default | Purpose |
-|---|---|---|
-| `SS_HOST` | - | Master Aggregator host |
-| `SS_PORT` | - | Port |
-| `SS_USER` | - | SQL user |
-| `SS_PASSWORD` | - | SQL user password |
-| `DUMP_DIR` |- | Where dumps/logs are written |
-| `PARALLEL_JOBS` | `8` | Concurrent `INSERT ... SELECT` copy jobs |
+The script reads connection settings from environment variables, so make sure to set the required environment variables before execution.
 
+> **Note:** If the environment variables are not set, the script will fail to execute.
+>
+> The script prompts the operator to enter `SS_PASSWORD` interactively if it is not provided.
+
+| Variable        | Default | Purpose                                      |
+|-----------------|---------|----------------------------------------------|
+| `SS_HOST`       | -       | Master Aggregator host                       |
+| `SS_PORT`       | -       | SingleStore SQL port                         |
+| `SS_USER`       | -       | SQL user                                     |
+| `SS_PASSWORD`   | Prompt  | SQL user password (entered interactively)    |
+| `DUMP_DIR`      | -       | Directory where dumps and logs are written   |
+| `PARALLEL_JOBS` | `8`     | Number of concurrent `INSERT ... SELECT` copy jobs |
 
 ## Usage
 
