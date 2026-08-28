@@ -7,6 +7,8 @@ schema, routines, triggers, and pipelines.
 Built for a project reducing partition counts across ~120 over-provisioned
 production databases on **SingleStore 8.9.34 / RHEL 8.1**.
 
+**Current version:** 1.1.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Why this exists
 
 SingleStore doesn't support changing a database's partition count in place —
@@ -32,7 +34,7 @@ working copies of the data.
 
 | Mode | Use case | Flow |
 |---|---|---|
-| **1 — Single database** | One database, picked interactively | Three sub-paths depending on naming (see below) |
+| **1 — Single database** | One database | Three sub-paths depending on naming (see below) |
 | **2 — Multi-DB, `_vew` only** | Batch of view-only databases, same target partition count | Full dump → drop → recreate → restore, per DB, one upfront confirmation |
 | **3 — Multi-DB, non-`_vew`** | Batch of regular databases, same target partition count | Intermediate-DB path (see below), pre-flight validation for the whole batch upfront |
 
@@ -62,6 +64,8 @@ working copies of the data.
 
 ## Prerequisites
 
+- Bash 4+ (the script uses `${var,,}` case conversion and other Bash 4
+  features — note that macOS ships Bash 3 by default)
 - `memsql` CLI and `mysqldump` on the host running the script
 - Enough free space in the dump directory for a schema (or full, for `_vew`)
   dump of the largest database being repartitioned
@@ -72,32 +76,76 @@ working copies of the data.
 
 ## Configuration
 
-The script reads connection settings from environment variables, so make sure to set the required environment variables before execution.
+Connection settings come from environment variables. The script exits
+immediately if a required variable is unset — nothing is hardcoded.
 
-> **Note:** If the environment variables are not set, the script will fail to execute.
->
-> The script prompts the operator to enter `SS_PASSWORD` interactively if it is not provided.
-
-| Variable        | Default | Purpose                                      |
-|-----------------|---------|----------------------------------------------|
-| `SS_HOST`       | -       | Master Aggregator host                       |
-| `SS_PORT`       | -       | SingleStore SQL port                         |
-| `SS_USER`       | -       | SQL user                                     |
-| `SS_PASSWORD`   | Prompt  | SQL user password (entered interactively)    |
-| `DUMP_DIR`      | -       | Directory where dumps and logs are written   |
-| `PARALLEL_JOBS` | `8`     | Number of concurrent `INSERT ... SELECT` copy jobs |
+| Variable | Required | Purpose |
+|---|---|---|
+| `SINGLESTORE_HOST` | Yes | Master Aggregator host |
+| `SINGLESTORE_PORT` | Yes | SingleStore SQL port |
+| `SINGLESTORE_USER` | Yes | SQL user |
+| `SINGLESTORE_CRED_FILE` | No | Path to a file containing the SQL password. If unset, the script prompts interactively. |
+| `DUMP_DIR` | No | Directory where dumps and logs are written |
+| `PARALLEL_JOBS` | No (default `8`) | Number of concurrent `INSERT ... SELECT` copy jobs |
 
 ## Usage
 
+### Interactive
+
 ```bash
-export SS_HOST=10.x.x.x        # your Master Aggregator
-export DUMP_DIR=/dump/dir
-export PARALLEL_JOBS=4         # tune it based on the available resources / tables size
+export SINGLESTORE_HOST=10.x.x.x      # your Master Aggregator
+export SINGLESTORE_PORT=3306
+export SINGLESTORE_USER=root
+export DUMP_DIR=/path/to/dump/dir
+export PARALLEL_JOBS=4                # tune based on available resources / table sizes
 ./db_repartition.sh
 ```
 
-The script is fully interactive — it prompts for mode, database name(s), and
-target partition count, and shows a summary table before any destructive step.
+Prompts for mode, database name(s), and target partition count, and shows a
+summary table before any destructive step.
+
+### Non-interactive
+
+Every prompt can be supplied as a flag. Anything not given falls back to
+prompting, so the two can be mixed freely.
+
+| Flag | Value | Purpose |
+|---|---|---|
+| `--mode` | `1`\|`2`\|`3` | Operation mode (same as the interactive menu) |
+| `--db` | name | Source database (mode 1) |
+| `--target` | name | Target database name (mode 1) |
+| `--db-list` | `a,b,c` | Comma-separated database list (modes 2/3) |
+| `--partitions` | integer | Target partition count (max 104) |
+| `--yes` | — | Auto-confirm every destructive prompt |
+| `--version`, `-V` | — | Print version and exit |
+| `--help`, `-h` | — | Show usage and exit |
+
+Single database, fully specified:
+
+```bash
+./db_repartition.sh --mode 1 --db sales_db --target sales_db --partitions 16
+```
+
+Batch, with every confirmation auto-approved:
+
+```bash
+./db_repartition.sh --mode 3 --db-list orders,inventory,customers --partitions 8 --yes
+```
+
+Partial — supply what you know, get prompted for the rest:
+
+```bash
+./db_repartition.sh --mode 1 --db sales_db
+```
+
+> **`--yes` removes every safety gate**, including the confirmation before
+> `DROP DATABASE`. A mistyped `--db` value will not be caught by a human.
+> Use it only for runs you have already validated.
+
+Invalid input fails immediately rather than falling back to prompting — an
+unknown flag, a non-numeric partition count, a mode outside 1–3, or a flag
+whose value is missing or looks like another flag (`--db --target`) all
+abort with a clear message and a non-zero exit code.
 
 ## Safety model summary
 
@@ -108,7 +156,7 @@ target partition count, and shows a summary table before any destructive step.
 | Create intermediate/target DB | No | AUTO |
 | Data copy into intermediate/target | No (source untouched) | AUTO |
 | Validation | No | N/A — blocks progress on failure |
-| **`DROP DATABASE` (source)** | **Yes** | **Always — every mode** |
+| **`DROP DATABASE` (source)** | **Yes** | **Always — unless `--yes` is set** |
 | Recreate + restore | No (source already gone; interm/dump is the backup) | AUTO |
 | Final validation | No | N/A — blocks pipeline restart on failure |
 | Drop intermediate DB | Yes | Yes (single-DB); manual, deferred (batch) |
@@ -128,13 +176,17 @@ target partition count, and shows a summary table before any destructive step.
 
 ## Security notes
 
-- Replace any hardcoded internal IPs, hostnames, or credential file paths
-  with environment variables.
+- No internal IPs, hostnames, or credential paths are baked into the script —
+  connection details must be supplied via environment variables.
+- `SINGLESTORE_CRED_FILE` should contain only the password and be readable
+  only by the account running the script (`chmod 600`). Never commit it.
+- When `--yes` is set and no credential source is configured, the script
+  errors out rather than prompting — so an unattended run fails fast instead
+  of hanging on a password prompt.
 - Dumps and logs are written outside this repo by default
   (`DUMP_DIR`/`LOG_FILE`); `.gitignore` also excludes common dump/log
   patterns as a second layer of protection.
 
 ## License
 
-See [LICENSE](LICENSE) — currently marked internal-use-only. Swap for
-MIT/Apache 2.0 if you want to open this up.
+See [LICENSE](LICENSE).
