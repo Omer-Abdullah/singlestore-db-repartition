@@ -9,6 +9,13 @@
 #
 # =============================================================================
 
+# ── Script version ────────────────────────────────────────────────────────────
+# Semantic versioning: MAJOR.MINOR.PATCH
+#   MAJOR — breaking change to CLI/behavior that requires operator action
+#   MINOR — new backwards-compatible feature (e.g. new flag)
+#   PATCH — bug fix, no interface change
+VERSION="1.1.0"
+
 set -euo pipefail
 
 # ── Colour codes for terminal output ─────────────────────────────────────────
@@ -28,7 +35,8 @@ SS_PASSWORD=
 DUMP_DIR="${DUMP_DIR:-/default/dump/directory}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-8}"   # concurrent INSERT SELECT jobs; tune to CPU/IO headroom
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/default/logFile/directory/name_${TIMESTAMP}.log"
+LOG_FILE="$HOME/ss_logs/name_${TIMESTAMP}.log"
+
 
 # ── Prefixes every message with a timestamp ───────────────────────────────────
 log() {
@@ -51,11 +59,104 @@ error_exit() {
     exit 1
 }
 
+# ── Validate that a flag's value exists and isn't another flag ────────────────
+require_value() {
+    local flag="$1" value="${2:-}"
+    if [[ -z "${value}" ]]; then
+        error_exit "Option '${flag}' requires a value, but none was given."
+    fi
+    if [[ "${value}" == -* ]]; then
+        error_exit "Option '${flag}' requires a value, but got '${value}' (which looks like another flag)."
+    fi
+}
+
+# ── CLI flag parsing — enables non-interactive/scripted runs ──────────────────
+AUTO_YES=false
+CLI_MODE=""
+CLI_DB=""
+CLI_TARGET=""
+CLI_DB_LIST=""
+CLI_PARTITIONS=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --yes)
+            AUTO_YES=true
+            shift
+            ;;
+        --mode)
+            require_value "$1" "${2:-}"
+            CLI_MODE="$2"
+            shift 2
+            ;;
+        --db)
+            require_value "$1" "${2:-}"
+            CLI_DB="$2"
+            shift 2
+            ;;
+        --target)
+            require_value "$1" "${2:-}"
+            CLI_TARGET="$2"
+            shift 2
+            ;;
+        --db-list)
+            require_value "$1" "${2:-}"
+            CLI_DB_LIST="$2"
+            shift 2
+            ;;
+        --partitions)
+            require_value "$1" "${2:-}"
+            CLI_PARTITIONS="$2"
+            shift 2
+            ;;
+	--version|-V)
+            echo "db_repartition.sh version ${VERSION}"
+            exit 0
+            ;;
+        --help|-h)
+            echo "Usage: $0 [options]"
+            echo "  --mode {1|2|3}         Operation mode (same as the interactive menu)"
+            echo "  --db NAME              Source database (mode 1)"
+            echo "  --target NAME          Target database name (mode 1)"
+            echo "  --db-list a,b,c        Comma-separated database list (modes 2/3)"
+            echo "  --partitions N         Target partition count"
+	    echo "  --version, -V          Print script version and exit"
+            echo "  --yes                  Auto-confirm every destructive prompt"
+            echo "  --help, -h             Show this message"
+            exit 0
+            ;;
+        *)
+            error_exit "Unknown option: '$1'. Run with --help for usage."
+            ;;
+    esac
+done
+
+# ── Validate CLI values (only those actually provided) ────────────────────────
+if [[ -n "${CLI_MODE}" ]]; then
+    [[ ! "${CLI_MODE}" =~ ^[123]$ ]] \
+        && error_exit "--mode must be 1, 2, or 3 (got '${CLI_MODE}')."
+fi
+
+if [[ -n "${CLI_PARTITIONS}" ]]; then
+    [[ ! "${CLI_PARTITIONS}" =~ ^[1-9][0-9]*$ ]] \
+        && error_exit "--partitions must be a positive integer (got '${CLI_PARTITIONS}')."
+    [[ "${CLI_PARTITIONS}" -gt 104 ]] \
+        && error_exit "--partitions too high (max allowed: 104, got '${CLI_PARTITIONS}')."
+fi
+
+if [[ -n "${CLI_DB}" && -n "${CLI_DB_LIST}" ]]; then
+    error_exit "--db and --db-list are mutually exclusive. Use --db for mode 1, --db-list for modes 2/3."
+fi
+
 # ── Asks a yes/no question; exits on anything other than 'y' ─────────────────
 # Default answer is 'N' — the user must explicitly type 'y' to continue.
 confirm_or_exit() {
     local prompt="$1"
     local answer
+	 if [[ "${AUTO_YES}" == true ]]; then
+        log "${YELLOW}AUTO-CONFIRM (--yes):${NC} ${prompt}"
+        return 0
+    fi
     echo
     read -rp "  ${YELLOW}${prompt}${NC} ${BOLD1}(y/N): " answer
     answer="${answer:-N}"
@@ -328,7 +429,7 @@ repartition_vew() {
 # =============================================================================
 # STEP 1 — Prompt for the source database name and verify it exists
 # =============================================================================
-banner "SingleStore Database Repartitioning Script"
+banner "SingleStore Database Repartitioning Script v${VERSION}"
 
 # Prompt for password only if not already set in the environment
 if [[ -z "${SS_PASSWORD:-}" ]]; then
@@ -344,12 +445,18 @@ memsql -h"${SS_HOST}" -P"${SS_PORT}" -u"${SS_USER}" -p"${SS_PASSWORD}" \
 # =============================================================================
 # OPERATION MODE — single database, multi-DB _vew batch, or multi-DB non-_vew batch
 # =============================================================================
-banner "Operation Mode"
-echo "  1) Single database (any type: _vew, _tbl, plain)"
-echo "  2) Multiple databases (_vew only — same partition count for all)"
-echo "  3) Multiple databases (non-_vew — same partition count for all)"
-echo
-read -rp "Choice [1/2/3]: " OP_MODE
+if [[ -n "${CLI_MODE}" ]]; then
+    OP_MODE="${CLI_MODE}"
+    log "Operation mode ${OP_MODE} supplied via --mode (skipping prompt)."
+else
+    banner "Operation Mode"
+    echo "  1) Single database (any type: _vew, _tbl, plain)"
+    echo "  2) Multiple databases (_vew only — same partition count for all)"
+    echo "  3) Multiple databases (non-_vew — same partition count for all)"
+    echo
+    read -rp "Choice [1/2/3]: " OP_MODE
+fi
+
 [[ "${OP_MODE}" != "1" && "${OP_MODE}" != "2" && "${OP_MODE}" != "3" ]] \
     && error_exit "Invalid choice — enter 1, 2, or 3."
 
@@ -359,7 +466,12 @@ read -rp "Choice [1/2/3]: " OP_MODE
 if [[ "${OP_MODE}" == "2" ]]; then
     banner "Multi-DB Mode — _vew databases only"
 
-    read -rp "Enter database names (space- or comma-separated): " DB_LIST_RAW
+    if [[ -n "${CLI_DB_LIST}" ]]; then
+        DB_LIST_RAW="${CLI_DB_LIST}"
+        log "Database list supplied via --db-list (skipping prompt)."
+    else
+        read -rp "Enter database names (space- or comma-separated): " DB_LIST_RAW
+    fi
     [[ -z "${DB_LIST_RAW}" ]] && error_exit "Database list cannot be empty."
 
     # Split on commas and whitespace
@@ -400,7 +512,12 @@ if [[ "${OP_MODE}" == "2" ]]; then
     echo
 
     # Partition count (applied to all DBs in the batch)
-    read -rp "Required number of partitions (applied to all): " REQ_PARTITIONS
+        if [[ -n "${CLI_PARTITIONS}" ]]; then
+        REQ_PARTITIONS="${CLI_PARTITIONS}"
+        log "Partition count ${REQ_PARTITIONS} supplied via --partitions (skipping prompt)."
+    else
+        read -rp "Required number of partitions (applied to all): " REQ_PARTITIONS
+    fi
     [[ -z "${REQ_PARTITIONS}" ]]                 && error_exit "Partition count cannot be empty."
     [[ ! "${REQ_PARTITIONS}" =~ ^[1-9][0-9]*$ ]] && error_exit "Partition count must be a positive integer."
     [[ "${REQ_PARTITIONS}" -gt 104 ]]            && error_exit "Partition count too high (max allowed: 104)."
@@ -442,7 +559,12 @@ fi
 if [[ "${OP_MODE}" == "3" ]]; then
     banner "Multi-DB Mode — non-_vew databases (intermediate path)"
 
-    read -rp "Enter database names (space- or comma-separated): " DB_LIST_RAW
+    if [[ -n "${CLI_DB_LIST}" ]]; then
+        DB_LIST_RAW="${CLI_DB_LIST}"
+        log "Database list supplied via --db-list (skipping prompt)."
+    else
+        read -rp "Enter database names (space- or comma-separated): " DB_LIST_RAW
+    fi
     [[ -z "${DB_LIST_RAW}" ]] && error_exit "Database list cannot be empty."
 
     # Split on commas and whitespace; drop empty entries from doubled separators
@@ -518,7 +640,12 @@ if [[ "${OP_MODE}" == "3" ]]; then
     echo
 
     # ── Partition count (one value applied to all databases in batch) ─────────
-    read -rp "Required number of partitions (applied to all): " REQ_PARTITIONS
+        if [[ -n "${CLI_PARTITIONS}" ]]; then
+        REQ_PARTITIONS="${CLI_PARTITIONS}"
+        log "Partition count ${REQ_PARTITIONS} supplied via --partitions (skipping prompt)."
+    else
+        read -rp "Required number of partitions (applied to all): " REQ_PARTITIONS
+    fi
     [[ -z "${REQ_PARTITIONS}" ]]                 && error_exit "Partition count cannot be empty."
     [[ ! "${REQ_PARTITIONS}" =~ ^[1-9][0-9]*$ ]] && error_exit "Partition count must be a positive integer."
     [[ "${REQ_PARTITIONS}" -gt 104 ]]            && error_exit "Partition count too high (max allowed: 104)."
@@ -661,7 +788,12 @@ fi
 # =============================================================================
 
 banner "Step 1 — Source Database"
-read -rp "Enter the database name: " DB_NAME
+if [[ -n "${CLI_DB}" ]]; then
+    DB_NAME="${CLI_DB}"
+    log "Source database '${DB_NAME}' supplied via --db (skipping prompt)."
+else
+    read -rp "Enter the database name: " DB_NAME
+fi
 [[ -z "${DB_NAME}" ]] && error_exit "Database name cannot be empty."
 
 DB_EXISTS=$(sql "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${DB_NAME}';")
@@ -733,12 +865,23 @@ fi
 # =============================================================================
 banner "Step 5 — Repartition Parameters"
 
-read -rp "Required number of partitions: " REQ_PARTITIONS
+
+if [[ -n "${CLI_PARTITIONS}" ]]; then
+    REQ_PARTITIONS="${CLI_PARTITIONS}"
+    log "Partition count ${REQ_PARTITIONS} supplied via --partitions (skipping prompt)."
+else
+    read -rp "Required number of partitions: " REQ_PARTITIONS
+fi
 [[ -z "${REQ_PARTITIONS}" ]]                  && error_exit "Partition count cannot be empty."
 [[ ! "${REQ_PARTITIONS}" =~ ^[1-9][0-9]*$ ]] && error_exit "Partition count must be a positive integer."
 [[ "${REQ_PARTITIONS}" -gt 104 ]] && error_exit "Partition count too high (max allowed: 104)."
 
-read -rp "Required database name: " NEW_DB_NAME
+if [[ -n "${CLI_TARGET}" ]]; then
+    NEW_DB_NAME="${CLI_TARGET}"
+    log "Target database '${NEW_DB_NAME}' supplied via --target (skipping prompt)."
+else
+    read -rp "Required database name: " NEW_DB_NAME
+fi
 [[ -z "${NEW_DB_NAME}" ]] && error_exit "New database name cannot be empty."
 
 # Create dump directory and define output file paths for this run
